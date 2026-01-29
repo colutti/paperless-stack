@@ -1,0 +1,21 @@
+# Dados dos Bancos de Dados
+postgres/data/
+redis/data/
+
+# Dados do Paperless
+paperless/data/
+paperless/media/
+paperless/export/
+paperless/consume/
+
+# Dados da IA e Logs
+ollama/data/
+ollama/models/
+open-webui/data/
+paperless-ai/data/
+dozzle/data/
+n8n/data/
+
+# Arquivos de ambiente com segredos
+**/.env
+.webui_secret_key

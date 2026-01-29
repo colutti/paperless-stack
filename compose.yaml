@@ -1,10 +1,12 @@
 services:
-  # paperless-ngx main service
+  # ----------------------------------------------------------------------------------
+  # PAPERLESS CORE
+  # ----------------------------------------------------------------------------------
   paperless:
     image: ghcr.io/paperless-ngx/paperless-ngx:latest
     container_name: paperless-ngx
     restart: unless-stopped
-    env_file: 
+    env_file:
       - ./paperless/.env
     depends_on:
       - postgres
@@ -12,54 +14,56 @@ services:
       - gotenberg
       - tika
     ports:
-      - "8000:8000"
+      - "8001:8000" # <-- SEU PEDIDO: Acessível na porta 8001 do host
     volumes:
-      - ./paperless/data:/usr/src/paperless/data
-      - ./paperless/media:/usr/src/paperless/media
-      - ./paperless/export:/usr/src/paperless/export
-      - ./paperless/consume:/usr/src/paperless/consume
-  
-  # postgres database for paperless-ngx
+      - ./paperless/data:/usr/src/paperless/data:Z
+      - ./paperless/media:/usr/src/paperless/media:Z
+      - ./paperless/export:/usr/src/paperless/export:Z
+      - ./paperless/consume:/usr/src/paperless/consume:Z
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+
   postgres:
-    image: postgres:18
+    image: postgres:16
     restart: unless-stopped
     container_name: postgres
-    env_file: 
+    env_file:
       - ./postgres/.env
     volumes:
-      - ./postgres/data:/var/lib/postgresql
-  
-  # redis database for paperless-ngx
+      - ./postgres/data:/var/lib/postgresql/data:Z
+
   redis:
-    image: docker.io/library/redis:8
+    image: docker.io/library/redis:7
     container_name: redis
     restart: unless-stopped
-    env_file: 
+    env_file:
       - ./redis/.env
     volumes:
-      - ./redis/data:/data
-  
-  # gotenberg service that paperless uses for document conversion
+      - ./redis/data:/data:Z
+
   gotenberg:
-    image: docker.io/gotenberg/gotenberg:8.25
+    image: docker.io/gotenberg/gotenberg:8
     container_name: gotenberg
-    env_file: 
+    env_file:
       - ./gotenberg/.env
     restart: unless-stopped
     command:
       - "gotenberg"
       - "--chromium-disable-javascript=true"
       - "--chromium-allow-list=file:///tmp/.*"
-  
-  # tika service that paperless uses for document text extraction
+    dns:
+      - 8.8.8.8
+
   tika:
     image: docker.io/apache/tika:latest
     container_name: tika
     restart: unless-stopped
     env_file: ./tika/.env
-  
 
-    # open-webui service for LLM interaction
+  # ----------------------------------------------------------------------------------
+  # AI & LLM STACK (AMD + PODMAN)
+  # ----------------------------------------------------------------------------------
   open-webui:
     image: ghcr.io/open-webui/open-webui:latest
     container_name: open-webui
@@ -71,27 +75,41 @@ services:
     ports:
       - "3001:8080"
     volumes:
-      - ./open-webui/data:/app/backend/data
+      - ./open-webui/data:/app/backend/data:Z
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
 
-  # ollama service for local LLMs
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:rocm # <-- VERSÃO AMD
     container_name: ollama
     env_file:
       - ./ollama/.env
     volumes:
-      - ./ollama/data/:/root/.ollama
-      - ./ollama/models:/ollama-models
+      - ./ollama/data/:/root/.ollama:Z
+      - ./ollama/models:/ollama-models:Z
     restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    security_opt:
+      - label=disable
+    group_add:
+      - video
+    environment:
+      - HSA_OVERRIDE_GFX_VERSION=11.0.0
+      - OLLAMA_KEEP_ALIVE=5m
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_FLASH_ATTENTION=1
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
 
-  # paperless-ai service
+  # ----------------------------------------------------------------------------------
+  # PAPERLESS EXTENSIONS
+  # ----------------------------------------------------------------------------------
   paperless-ai:
     image: clusterzx/paperless-ai:latest
     container_name: paperless-ai
@@ -100,14 +118,16 @@ services:
       - ollama
       - paperless
     ports:
-      - "3000:3000"
+      - "3005:3000"
     env_file:
       - ./paperless-ai/.env
     volumes:
-      - ./paperless-ai/data:/app/data
-  
+      - ./paperless-ai/data:/app/data:Z
+    environment:
+      - OLLAMA_API_URL=http://ollama:11434
+    dns:
+      - 8.8.8.8
 
-  # paperless-gpt service
   paperless-gpt:
     image: icereed/paperless-gpt:latest
     container_name: paperless-gpt
@@ -120,18 +140,24 @@ services:
     env_file:
       - ./paperless-gpt/.env
     volumes:
-      - ./paperless-gpt/prompts:/app/prompts # Mount the prompts directory
+      - ./paperless-gpt/prompts:/app/prompts:Z
+    dns:
+      - 8.8.8.8
 
-
-  # optional but helpful log viewer
+  # ----------------------------------------------------------------------------------
+  # MONITORING
+  # ----------------------------------------------------------------------------------
   dozzle:
     image: amir20/dozzle:latest
     restart: unless-stopped
     container_name: dozzle
-    env_file: 
+    env_file:
       - ./dozzle/.env
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./dozzle/data:/data
+      # Ajustado para Podman rootless (UID 1000)
+      - /run/user/1000/podman/podman.sock:/var/run/docker.sock:Z
+      - ./dozzle/data:/data:Z
     ports:
-      - "8080:8080"
+      - "4000:8080"
+    security_opt:
+      - label=disable
